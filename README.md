@@ -42,22 +42,6 @@ INSTALACIÓN DE DEPENDENCIAS
    - Abre CMD o terminal y verifica con:
      > erl
 
-ESTRUCTURA DE CARPETAS
-
-project/
-│
-├── backend/
-│   ├── game_server.erl
-│   └── rebar.config
-│
-└── frontend/
-    ├── client.py
-    ├── network.py
-    ├── card.py
-    └── assets/
-        ├── fondo.png
-        └── carta_ejemplo.png
-
 EJECUCIÓN DEL SERVIDOR ERLANG
 
 1. Abre una terminal (CMD o PowerShell, NO WSL si deseas conexión entre PCs).
