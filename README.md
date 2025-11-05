@@ -1,6 +1,5 @@
-==========================
+
 HERO REALMS LP - DEMO TCP
-==========================
 
 📌 Descripción
 --------------
@@ -13,9 +12,7 @@ El objetivo del demo es mostrar:
 - Visualización del fondo y las cartas del jugador.
 - Interacción básica: detección de hover y clic en cartas.
 
-======================
 REQUISITOS DEL SISTEMA
-======================
 
 🔹 En ambas computadoras:
 - Python 3.9 o superior (recomendado Python 3.12)
@@ -27,9 +24,7 @@ REQUISITOS DEL SISTEMA
 🔹 Solo en la computadora que actuará como servidor:
 - Erlang/OTP 24 o superior (recomendado 25 o 26)
 
-=============================
 INSTALACIÓN DE DEPENDENCIAS
-=============================
 
 1. Verifica tu versión de Python:
    > python --version
@@ -47,9 +42,7 @@ INSTALACIÓN DE DEPENDENCIAS
    - Abre CMD o terminal y verifica con:
      > erl
 
-==============================
 ESTRUCTURA DE CARPETAS
-==============================
 
 project/
 │
@@ -65,9 +58,7 @@ project/
         ├── fondo.png
         └── carta_ejemplo.png
 
-==============================
 EJECUCIÓN DEL SERVIDOR ERLANG
-==============================
 
 1. Abre una terminal (CMD o PowerShell, NO WSL si deseas conexión entre PCs).
 2. Entra al directorio del backend:
@@ -85,9 +76,7 @@ EJECUCIÓN DEL SERVIDOR ERLANG
 
 6. Mantén esa ventana abierta durante la demo.
 
-==============================
 EJECUCIÓN DEL CLIENTE (FRONTEND)
-==============================
 
 1. Copia la carpeta `frontend/` a ambas computadoras.
 2. En cada PC, abre una terminal y ejecuta:
@@ -108,19 +97,14 @@ EJECUCIÓN DEL CLIENTE (FRONTEND)
 6. En el servidor, verás:
    Cliente conectado
 
-==============================
 CONTROLES Y FUNCIONALIDAD
-==============================
 
 - Pasa el mouse sobre las cartas → se elevan (efecto hover).
 - Clic en una carta → envía mensaje al servidor ("play_card").
-  
-==============================
+
 NOTAS ADICIONALES
-==============================
 
 - Ambas computadoras deben estar en la misma red local Wi-Fi o LAN.
 - El firewall de Windows debe permitir conexiones entrantes al puerto 4000.
 - Puedes cambiar la IP del servidor directamente en client.py si quieres fijarla.
 Frontend: Python + Arcade
-==============================
