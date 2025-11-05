@@ -1,83 +1,86 @@
+import socket
 import threading
-import websocket
-import json
 import time
+
 
 class NetworkClient:
     """
-    Gestiona la conexión WebSocket con el servidor de Erlang en un hilo separado.
+    Cliente TCP para comunicarse con el servidor Erlang.
+    Usa un hilo separado para escuchar mensajes y mantener la UI libre.
     """
-    def __init__(self, url="ws://localhost:8080/ws"):
-        self.url = url
-        self.ws = None
-        self.thread = None
-        self.is_running = True
+    def __init__(self, server_ip="127.0.0.1", port=4000):
+        self.server_ip = server_ip
+        self.port = port
+        self.socket = None
+        self.connected = False
+        self.listener_thread = None
         self.message_queue = []
-        self.status = "Desconectado"
+        self.last_message = ""
+        self._stop_flag = False
 
-    def start_connection(self):
-        """ Inicia la conexión en un hilo separado. """
-        self.thread = threading.Thread(target=self._run_ws)
-        self.thread.daemon = True
-        self.thread.start()
-        self.status = "Conectando..."
+    # --- Conexión ---
+    def connect(self):
+        """Intenta conectarse al servidor TCP."""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.connect((self.server_ip, self.port))
+            self.connected = True
+            print(f"✅ Conectado al servidor {self.server_ip}:{self.port}")
 
-    def _run_ws(self):
-        """ El bucle principal del WebSocket (se ejecuta en el hilo). """
-        while self.is_running:
+            # Inicia hilo de escucha
+            self.listener_thread = threading.Thread(target=self.listen_server, daemon=True)
+            self.listener_thread.start()
+        except Exception as e:
+            print(f"❌ Error al conectar: {e}")
+            self.connected = False
+
+    # --- Escucha ---
+    def listen_server(self):
+        """Hilo que recibe mensajes del servidor de manera continua."""
+        try:
+            while not self._stop_flag:
+                data = self.socket.recv(1024)
+                if not data:
+                    break
+                message = data.decode("utf-8", errors="ignore").strip()
+                if message:
+                    self.last_message = message
+                    self.message_queue.append(message)
+                    print(f"📨 Servidor -> {message}")
+        except Exception as e:
+            print(f"⚠️ Error en hilo de escucha: {e}")
+        finally:
+            self.connected = False
+            print("🔴 Conexión cerrada con el servidor.")
+
+    # --- Envío ---
+    def send(self, message):
+        """Envía texto al servidor."""
+        if self.connected and self.socket:
             try:
-                # Conexión al servidor de Erlang (puerto 8080, ruta /ws)
-                self.ws = websocket.WebSocketApp(
-                    self.url,
-                    on_open=self._on_open,
-                    on_message=self._on_message,
-                    on_error=self._on_error,
-                    on_close=self._on_close
-                )
-                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+                if not message.endswith("\n"):
+                    message += "\n"
+                self.socket.sendall(message.encode("utf-8"))
+                print(f"➡️ Enviado al servidor: {message.strip()}")
             except Exception as e:
-                print(f"Error al intentar conectar: {e}")
-                self.status = "Reconectando..."
-                time.sleep(5) # Espera antes de reintentar
+                print(f"❌ Error al enviar: {e}")
+                self.connected = False
 
-    def _on_open(self, ws):
-        """ Se llama cuando la conexión se abre correctamente. """
-        print("Conexión establecida con el servidor de Erlang.")
-        self.status = "Conectado"
-        
-    def _on_message(self, ws, message):
-        """ Se llama cuando se recibe un mensaje de Erlang. """
-        # Los mensajes se ponen en una cola para que el bucle de Arcade los lea
-        self.message_queue.append(message)
-
-    def _on_error(self, ws, error):
-        """ Se llama cuando hay un error. """
-        print(f"Error de WS: {error}")
-        self.status = f"Error: {error}"
-
-    def _on_close(self, ws, close_status_code, close_msg):
-        """ Se llama cuando la conexión se cierra. """
-        print(f"Conexión WS cerrada: {close_status_code} - {close_msg}")
-        self.status = "Desconectado"
-        
-    def send_message(self, message):
-        """ Envía un mensaje al servidor de Erlang. """
-        if self.ws and self.ws.sock and self.ws.sock.connected:
-            self.ws.send(message)
-            return True
-        return False
-
+    # --- Recepción ---
     def get_messages(self):
-        """ Devuelve la cola de mensajes recibidos y la limpia. """
-        messages = self.message_queue
-        self.message_queue = []
+        """Devuelve y limpia la cola de mensajes recibidos."""
+        messages = self.message_queue[:]
+        self.message_queue.clear()
         return messages
 
+    # --- Cierre ---
     def close_connection(self):
-        """ Cierra la conexión y detiene el hilo. """
-        self.is_running = False
-        if self.ws:
-            self.ws.close()
-        if self.thread:
-
-            self.thread.join(timeout=1)
+        """Cierra la conexión TCP y detiene el hilo."""
+        self._stop_flag = True
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+        self.connected = False
+        print("🧩 Conexión TCP finalizada por el cliente.")

@@ -1,136 +1,189 @@
 import arcade
 import json
-from network_client import NetworkClient
+import socket
+import threading
 from card import Card
 
-# --- CONSTANTES ---
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 800
-CARD_SCALE = 0.5
-CARD_WIDTH = 140 * CARD_SCALE
+# ============================
+# CONFIGURACIÓN
+# ============================
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+SCREEN_TITLE = "Hero Realms LP - Demo TCP"
 
-class HeroRealmsClient(arcade.Window):
-    """
-    Clase principal que maneja la interfaz gráfica y la lógica del cliente.
-    """
-    def __init__(self):
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, "Hero Realms LP")
-        arcade.set_background_color(arcade.color.AMAZON)
-        
-        # Conexión al servidor de Erlang
-        self.network = NetworkClient()
-        
-        # Estado del juego
-        self.current_turn = "Esperando Jugadores..."
-        
-        # Elementos gráficos
-        self.player_hand = arcade.SpriteList()
-        self.card_being_hovered = None
+# ============================
+# CLIENTE DE RED
+# ============================
+class NetworkClient:
+    def __init__(self, host, port=4000):
+        self.host = host
+        self.port = port
+        self.sock = None
+        self.connected = False
+        self.last_message = ""
+        self.on_message = None  # callback
 
-    def setup(self):
-        """ Inicializa la conexión y carga los recursos. """
-        self.network.start_connection()
-        
-        # Simulación de cartas (necesitas reemplazar esto con tus assets)
-        # Asegúrate de tener una carpeta 'assets' con imágenes.
+    def connect(self):
         try:
-            self.load_sample_hand()
-        except FileNotFoundError:
-             print("ADVERTENCIA: No se pudieron cargar las imágenes de las cartas. Asegúrate de tener la carpeta 'assets'.")
-             
-    def load_sample_hand(self):
-        """ Carga una mano de prueba (ejemplo). """
-        # Asegúrate de que esta ruta sea válida
-        IMAGE_PATH = "assets/carta_ejemplo.png" 
-        
-        for i in range(5):
-            # Crea una carta (usa un ID de prueba)
-            card = Card(IMAGE_PATH, CARD_SCALE, card_id=f"C{i+1}")
-            
-            # Posición de la carta en la mano del jugador
-            x = (i * (CARD_WIDTH + 10)) + 300 
-            y = 150
-            card.update_position(x, y)
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.host, self.port))
+            self.connected = True
+            print(f"✅ Conectado al servidor {self.host}:{self.port}")
+            threading.Thread(target=self._listen, daemon=True).start()
+        except Exception as e:
+            print("❌ ERROR AL CONECTAR:", e)
+
+    def send(self, data):
+        if self.connected:
+            try:
+                self.sock.sendall(data.encode())
+            except Exception as e:
+                print("Error al enviar:", e)
+
+    def _listen(self):
+        while self.connected:
+            try:
+                data = self.sock.recv(1024)
+                if not data:
+                    break
+                msg = data.decode("utf-8").strip()
+                if self.on_message:
+                    self.on_message(msg)
+            except Exception:
+                break
+        self.connected = False
+        print("🔌 Conexión cerrada con el servidor.")
+
+# ============================
+# CLIENTE GRÁFICO
+# ============================
+class HeroRealmsClient(arcade.Window):
+    def __init__(self, server_ip):
+        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE, update_rate=1/60)
+        arcade.set_background_color(arcade.color.AMAZON)
+
+        # Red
+        self.network = NetworkClient(server_ip)
+        self.network.on_message = self._process_erlang_message
+        self.network.connect()
+
+        # Estado del juego
+        self.current_turn = "Esperando jugadores"
+        self.player_role = None
+
+        # Fondo
+        self.background_list = arcade.SpriteList()
+        bg = arcade.Sprite(center_x=SCREEN_WIDTH // 2, center_y=SCREEN_HEIGHT // 2)
+        bg.texture = arcade.load_texture("assets/fondo.png")
+        bg.width = SCREEN_WIDTH
+        bg.height = SCREEN_HEIGHT
+        self.background_list.append(bg)
+
+        # Mano de cartas
+        self.player_hand = arcade.SpriteList()
+        self._create_sample_hand()
+
+        # Botón "Fin de Turno"
+        self.end_turn_button_list = arcade.SpriteList()
+        button = arcade.Sprite("assets/boton_turno.png", scale=0.08,  # ← pequeño
+                               center_x=SCREEN_WIDTH - 80, center_y=SCREEN_HEIGHT - 60)
+        self.end_turn_button_list.append(button)
+        self.end_turn_button = button
+
+    def _create_sample_hand(self):
+        """Crea cartas de ejemplo en la parte inferior."""
+        card_paths = [
+            "assets/carta1.png",
+            "assets/carta2.png",
+            "assets/carta3.png",
+            "assets/carta4.png",
+            "assets/carta5.png"
+        ]
+        start_x = 400
+        y = 150
+        for i, path in enumerate(card_paths):
+            card = Card(path, scale=0.3, card_id=f"C{i+1}")
+            card.update_position(start_x + i * 120, y)
             card.is_clickable = True
-            
             self.player_hand.append(card)
 
-    def on_draw(self):
-        # Llama a clear() para limpiar la ventana en cada frame
-        self.clear() 
+    # ============================
+    # EVENTOS GRÁFICOS
+    # ============================
 
-        # Dibuja el texto que tienes definido (Jugador, vida, etc.)
-        self.label.draw()
-        self.vida_label.draw()
-        
-        # Dibujar la mano del jugador
+    def on_draw(self):
+        self.clear()
+        self.background_list.draw()
         self.player_hand.draw()
 
-        # Mostrar estado y turno actual
-        arcade.draw_text(f"Conexión: {self.network.status} | Turno: {self.current_turn}", 
-                         10, SCREEN_HEIGHT - 30, arcade.color.WHITE, 18)
-        
-    def on_update(self, delta_time):
-        """ Lógica de actualización del juego. """
-        
-        # 1. Procesar mensajes de Erlang
-        for message in self.network.get_messages():
-            self._process_erlang_message(message)
-            
-        # 2. Actualizar el estado de la mano (hover)
-        if self.card_being_hovered:
-            self.card_being_hovered.on_hover()
-        
-    def _process_erlang_message(self, message):
-        """ Decodifica y aplica los cambios enviados por el servidor de Erlang. """
-        try:
-            # Tu handler de Erlang envía: {"action":"update","turn":"PlayerA"}
-            data = json.loads(message)
-            
-            if data.get("action") == "update" and data.get("turn"):
-                self.current_turn = data["turn"]
-                print(f"Turno actualizado a: {self.current_turn}")
-                
-            # Aquí iría más lógica para actualizar el tablero, robar cartas, etc.
-                
-        except json.JSONDecodeError:
-            print(f"Error al decodificar JSON: {message}")
-            
-    def on_mouse_motion(self, x: float, y: float, dx: float, dy: float):
-        """ Manejo del movimiento del ratón para efectos visuales (hover). """
-        if self.card_being_hovered:
-            self.card_being_hovered.on_unhover()
-            self.card_being_hovered = None
+        # Mostrar turno y conexión
+        arcade.draw_text(f"Conexión: {'Conectado' if self.network.connected else 'Desconectado'}",
+                         20, SCREEN_HEIGHT - 40, arcade.color.WHITE, 16)
 
-        # Verificar qué carta está siendo apuntada
-        hit_sprites = arcade.get_sprites_at_point((x, y), self.player_hand)
-        if hit_sprites:
-            self.card_being_hovered = hit_sprites[0]
+        color_turno = arcade.color.GREEN if self.current_turn == self.player_role else arcade.color.GRAY
+        turno_text = "Tu turno" if self.current_turn == self.player_role else "Esperando..."
+        arcade.draw_text(f"{turno_text} ({self.current_turn})", 20, SCREEN_HEIGHT - 70, color_turno, 18)
+
+        # Dibujar botón si es tu turno
+        if self.player_role == self.current_turn:
+            self.end_turn_button_list.draw()
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        for card in self.player_hand:
+            if card.is_clickable:
+                if card.collides_with_point((x, y)):
+                    card.on_hover()
+                else:
+                    card.on_unhover()
 
     def on_mouse_press(self, x, y, button, modifiers):
-        """ Manejo de clics (ej. jugar una carta o pasar el turno). """
-        
-        # 1. Detectar si se hizo clic en una carta jugable
-        clicked_sprites = arcade.get_sprites_at_point((x, y), self.player_hand)
-        if clicked_sprites and clicked_sprites[0].is_clickable:
-            card = clicked_sprites[0]
-            print(f"Carta {card.card_id} clicada. Enviando al servidor...")
-            
-            # **Asegúrate de que el formato de envío coincida con lo que espera Erlang**
-            # (El Matchmaker de Erlang solo acepta END_TURN por ahora)
-            # self.network.send_message(f'{{"action":"play_card", "id":"{card.card_id}"}}')
-            
-        # 2. Lógica del botón "Fin de Turno" (simulación)
-        if x > 10 and x < 200 and y > 10 and y < 50:
-             self.network.send_message("END_TURN")
-             print("Solicitud de fin de turno enviada a Erlang.")
-             
-    def on_close(self):
-        """ Se llama al cerrar la ventana. """
-        self.network.close_connection()
-        super().on_close()
+        if self.player_role != self.current_turn:
+            print("❌ No es tu turno.")
+            return
+
+        # Fin de turno
+        if self.end_turn_button.collides_with_point((x, y)):
+            print("➡️ Fin de turno enviado.")
+            self.network.send("END_TURN")
+            return
+
+        # Clic en carta
+        clicked = arcade.get_sprites_at_point((x, y), self.player_hand)
+        if clicked:
+            card = clicked[0]
+            msg = json.dumps({"action": "play_card", "id": card.card_id})
+            self.network.send(msg)
+            print(f"🃏 {self.player_role} jugó carta {card.card_id}")
+
+    # ============================
+    # PROCESAMIENTO DE MENSAJES
+    # ============================
+
+    def _process_erlang_message(self, message):
+        msg = message.strip()
+        print(f"📨 Servidor -> {msg}")
+
+        if msg.startswith("{"):
+            try:
+                data = json.loads(msg)
+                if data.get("action") == "update":
+                    turn = data.get("turn")
+                    # Si aún no sabe quién soy, me asigna mi rol
+                    if not self.player_role:
+                        self.player_role = turn
+                    self.current_turn = turn
+            except Exception as e:
+                print("Error al interpretar JSON:", e)
+
+
+# ============================
+# MAIN
+# ============================
+
+def main():
+    server_ip = input("IP del servidor Erlang: ").strip()
+    game = HeroRealmsClient(server_ip)
+    arcade.run()
 
 if __name__ == "__main__":
-    game = HeroRealmsClient()
-    game.setup()
-    arcade.run()
+    main()
