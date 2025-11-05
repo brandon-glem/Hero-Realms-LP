@@ -79,4 +79,5 @@ class NetworkClient:
         if self.ws:
             self.ws.close()
         if self.thread:
+
             self.thread.join(timeout=1)
