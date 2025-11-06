@@ -2,10 +2,14 @@ import arcade
 import json
 import socket
 import threading
+
+import os
+import random
+
 from card import Card
 
 # ============================
-# CONFIGURACIÓN
+# CONFIGURACION
 # ============================
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
@@ -55,7 +59,7 @@ class NetworkClient:
         print("🔌 Conexión cerrada con el servidor.")
 
 # ============================
-# CLIENTE GRÁFICO
+# CLIENTE GRAFICO
 # ============================
 class HeroRealmsClient(arcade.Window):
     def __init__(self, server_ip):
@@ -83,7 +87,11 @@ class HeroRealmsClient(arcade.Window):
         self.player_hand = arcade.SpriteList()
         self._create_sample_hand()
 
-        # Botón "Fin de Turno"
+        # Mercado
+        self.market = arcade.SpriteList()
+        self._create_market()
+
+        # Boton "Fin de Turno"
         self.end_turn_button_list = arcade.SpriteList()
         button = arcade.Sprite("assets/boton_turno.png", scale=0.08,  # ← pequeño
                                center_x=SCREEN_WIDTH - 80, center_y=SCREEN_HEIGHT - 60)
@@ -93,11 +101,11 @@ class HeroRealmsClient(arcade.Window):
     def _create_sample_hand(self):
         """Crea cartas de ejemplo en la parte inferior."""
         card_paths = [
-            "assets/carta1.png",
-            "assets/carta2.png",
-            "assets/carta3.png",
-            "assets/carta4.png",
-            "assets/carta5.png"
+            "assets/primarygold1.png",
+            "assets/g1.png",
+            "assets/b1.png",
+            "assets/primarydagger1.png",
+            "assets/primaryplayer1.png"
         ]
         start_x = 400
         y = 150
@@ -106,17 +114,49 @@ class HeroRealmsClient(arcade.Window):
             card.update_position(start_x + i * 120, y)
             card.is_clickable = True
             self.player_hand.append(card)
+    
+    def _create_market(self):
+        ### Aqui creamos el mercado, entiendo que se crean de forma aleatoria.
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        ### Aqui agregar los excluidos para evitar que aparezcan elementos "No vendibles"
+        exclude = {"fondo.png", "boton_turno.png"}
+        gema = "primarygoldattack.png"
+
+        start_x = 400
+        y = 450
+
+        candidates = [f for f in os.listdir(assets_dir)
+                      if f.lower().endswith((".png", ".jpg", ".jpeg"))
+                      and f not in exclude
+                      and f != gema]
+        
+        ### Elegimos hasta 4 randoms unicos para el mercado (slots del 2 al 5)
+        elegidos = random.sample(candidates, min(4, len(candidates))) if candidates else []
+
+        cartas = [gema] + elegidos
+        
+        for i, fname in enumerate(cartas):
+            path = os.path.join("assets", fname)  # le pasamos el path relativo de assets
+            id_base = os.path.splitext(fname)[0]
+            card_id = f"M{i+1}_{id_base}"
+            card = Card(path, scale=0.3, card_id=card_id)
+            card.update_position(start_x + i * 120, y)
+            card.is_clickable = True
+            self.market.append(card)
 
     # ============================
-    # EVENTOS GRÁFICOS
+    # EVENTOS GRAFICOS
     # ============================
 
     def on_draw(self):
         self.clear()
+
+        ### Todo lo dibujado va aqui
         self.background_list.draw()
         self.player_hand.draw()
+        self.market.draw()
 
-        # Mostrar turno y conexión
+        # Mostrar turno y conexion
         arcade.draw_text(f"Conexión: {'Conectado' if self.network.connected else 'Desconectado'}",
                          20, SCREEN_HEIGHT - 40, arcade.color.WHITE, 16)
 
@@ -124,10 +164,12 @@ class HeroRealmsClient(arcade.Window):
         turno_text = "Tu turno" if self.current_turn == self.player_role else "Esperando..."
         arcade.draw_text(f"{turno_text} ({self.current_turn})", 20, SCREEN_HEIGHT - 70, color_turno, 18)
 
-        # Dibujar botón si es tu turno
+        # Dibujar boton si es tu turno
         if self.player_role == self.current_turn:
             self.end_turn_button_list.draw()
 
+    ### MOUSE
+    ### ANIMACION MOUSE HOVER
     def on_mouse_motion(self, x, y, dx, dy):
         for card in self.player_hand:
             if card.is_clickable:
@@ -136,6 +178,14 @@ class HeroRealmsClient(arcade.Window):
                 else:
                     card.on_unhover()
 
+        for card in self.market:
+            if card.is_clickable:
+                if card.collides_with_point((x, y)):
+                    card.on_hover()
+                else:
+                    card.on_unhover()
+
+    ### MOUSE CLICK
     def on_mouse_press(self, x, y, button, modifiers):
         if self.player_role != self.current_turn:
             print("❌ No es tu turno.")
@@ -155,6 +205,15 @@ class HeroRealmsClient(arcade.Window):
             self.network.send(msg)
             print(f"🃏 {self.player_role} jugó carta {card.card_id}")
 
+        # Click en mercado
+        clicked_market = arcade.get_sprites_at_point((x, y), self.market)
+        if clicked_market:
+            card = clicked_market[0]
+            msg = json.dumps({"action": "buy_card", "id": card.card_id})
+            self.network.send(msg)
+            print(f"🛒 {self.player_role} compró carta {card.card_id}")
+            return
+
     # ============================
     # PROCESAMIENTO DE MENSAJES
     # ============================
@@ -168,7 +227,7 @@ class HeroRealmsClient(arcade.Window):
                 data = json.loads(msg)
                 if data.get("action") == "update":
                     turn = data.get("turn")
-                    # Si aún no sabe quién soy, me asigna mi rol
+                    # Si aun no sabe quien soy, me asigna mi rol
                     if not self.player_role:
                         self.player_role = turn
                     self.current_turn = turn
